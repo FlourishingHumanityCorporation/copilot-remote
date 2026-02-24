@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
-import { Box, TextInput, IconButton, Text, Label } from '@primer/react';
-import { PaperAirplaneIcon, SquareIcon } from '@primer/octicons-react';
+import { Box, TextInput, IconButton, Text, Label, Button } from '@primer/react';
+import { PaperAirplaneIcon, SquareIcon, PlayIcon } from '@primer/octicons-react';
 import { MessageBubble } from './MessageBubble';
 import { api } from '../lib/api';
 import type { Session, ChatMessage } from '../types';
@@ -9,11 +9,13 @@ interface Props {
   session: Session;
   messages: ChatMessage[];
   onSend: (text: string) => void;
+  onResume: (sessionId: string, prompt?: string) => void;
 }
 
-export function ChatView({ session, messages, onSend }: Props) {
+export function ChatView({ session, messages, onSend, onResume }: Props) {
   const [input, setInput] = useState('');
   const [historicalMessages, setHistoricalMessages] = useState<ChatMessage[]>([]);
+  const [resuming, setResuming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Load historical messages when session changes
@@ -34,9 +36,25 @@ export function ChatView({ session, messages, onSend }: Props) {
   const handleSend = useCallback(() => {
     const text = input.trim();
     if (!text) return;
-    onSend(text);
+
+    if (session.status === 'running') {
+      onSend(text);
+    } else {
+      // Resume session with this prompt
+      setResuming(true);
+      onResume(session.id, text);
+    }
     setInput('');
-  }, [input, onSend]);
+  }, [input, onSend, onResume, session.id, session.status]);
+
+  const handleResume = useCallback(() => {
+    setResuming(true);
+    onResume(session.id);
+  }, [onResume, session.id]);
+
+  useEffect(() => {
+    if (session.status === 'running') setResuming(false);
+  }, [session.status]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -53,6 +71,9 @@ export function ChatView({ session, messages, onSend }: Props) {
     }
   }, [session.id]);
 
+  const isRunning = session.status === 'running';
+  const placeholder = isRunning ? 'Send a message...' : 'Type a message to resume this session...';
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       {/* Session header */}
@@ -63,10 +84,10 @@ export function ChatView({ session, messages, onSend }: Props) {
           </Text>
           <Text sx={{ color: 'fg.muted', fontSize: 0 }}>{session.cwd}</Text>
         </Box>
-        <Label variant={session.status === 'running' ? 'success' : 'secondary'}>
-          {session.status}
+        <Label variant={isRunning ? 'success' : 'secondary'}>
+          {isRunning ? 'running' : 'ended'}
         </Label>
-        {session.status === 'running' && (
+        {isRunning ? (
           <IconButton
             icon={SquareIcon}
             aria-label="Stop session"
@@ -74,10 +95,20 @@ export function ChatView({ session, messages, onSend }: Props) {
             size="small"
             onClick={handleKill}
           />
+        ) : (
+          <Button
+            leadingVisual={PlayIcon}
+            size="small"
+            variant="primary"
+            onClick={handleResume}
+            disabled={resuming}
+          >
+            {resuming ? 'Resuming...' : 'Resume'}
+          </Button>
         )}
       </Box>
 
-      {/* Messages area — use overflow-y scroll with explicit constraints */}
+      {/* Messages area */}
       <Box
         ref={scrollRef}
         sx={{
@@ -91,7 +122,7 @@ export function ChatView({ session, messages, onSend }: Props) {
         {allMessages.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Text sx={{ color: 'fg.muted', fontSize: 1 }}>
-              {session.status === 'running' ? 'Waiting for output...' : 'No messages in this session'}
+              {isRunning ? 'Waiting for output...' : 'No messages in this session'}
             </Text>
           </Box>
         )}
@@ -100,26 +131,24 @@ export function ChatView({ session, messages, onSend }: Props) {
         ))}
       </Box>
 
-      {/* Input area */}
-      {session.status === 'running' && (
-        <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'border.default', display: 'flex', gap: 2 }}>
-          <TextInput
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
-            sx={{ flex: 1 }}
-            autoFocus
-          />
-          <IconButton
-            icon={PaperAirplaneIcon}
-            aria-label="Send"
-            variant="primary"
-            onClick={handleSend}
-            disabled={!input.trim()}
-          />
-        </Box>
-      )}
+      {/* Input area — always visible */}
+      <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'border.default', display: 'flex', gap: 2, flexShrink: 0 }}>
+        <TextInput
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          sx={{ flex: 1 }}
+          autoFocus
+        />
+        <IconButton
+          icon={PaperAirplaneIcon}
+          aria-label="Send"
+          variant="primary"
+          onClick={handleSend}
+          disabled={!input.trim()}
+        />
+      </Box>
     </Box>
   );
 }

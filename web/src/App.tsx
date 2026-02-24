@@ -6,6 +6,7 @@ import { ConnectionStatus } from './components/ConnectionStatus';
 import { NewSessionDialog } from './components/NewSessionDialog';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useSessions } from './hooks/useSessions';
+import { api } from './lib/api';
 import type { WsMessage, ChatMessage } from './types';
 
 export default function App() {
@@ -38,6 +39,16 @@ export default function App() {
       sendInput(activeSessionId, text);
     }
   }, [activeSessionId, sendInput]);
+
+  const handleResumeSession = useCallback(async (sessionId: string, prompt?: string) => {
+    try {
+      const session = await api.createSession({ resume: sessionId, prompt });
+      refresh();
+      handleSelectSession(session.id);
+    } catch (err) {
+      console.error('Resume failed:', err);
+    }
+  }, [refresh, handleSelectSession]);
 
   const handleNewSession = useCallback(() => {
     setShowNewSession(true);
@@ -84,6 +95,7 @@ export default function App() {
               session={activeSession}
               messages={activeMessages}
               onSend={handleSendMessage}
+              onResume={handleResumeSession}
             />
           ) : (
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
