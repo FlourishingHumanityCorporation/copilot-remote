@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { Box, IconButton, Text, Label, Button } from '@primer/react';
-import { PaperAirplaneIcon, SquareIcon, PlayIcon } from '@primer/octicons-react';
+import { PaperAirplaneIcon, SquareIcon, PlayIcon, ChevronLeftIcon } from '@primer/octicons-react';
 import { MessageBubble } from './MessageBubble';
 import { api } from '../lib/api';
 import type { Session, ChatMessage } from '../types';
@@ -10,9 +10,10 @@ interface Props {
   messages: ChatMessage[];
   onSend: (text: string) => void;
   onResume: (sessionId: string, prompt?: string) => void;
+  onBack?: () => void;
 }
 
-export function ChatView({ session, messages, onSend, onResume }: Props) {
+export function ChatView({ session, messages, onSend, onResume, onBack }: Props) {
   const [input, setInput] = useState('');
   const [historicalMessages, setHistoricalMessages] = useState<ChatMessage[]>([]);
   const [resuming, setResuming] = useState(false);
@@ -84,6 +85,15 @@ export function ChatView({ session, messages, onSend, onResume }: Props) {
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       {/* Session header */}
       <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {onBack && (
+          <IconButton
+            icon={ChevronLeftIcon}
+            aria-label="Back to sessions"
+            variant="invisible"
+            size="small"
+            onClick={onBack}
+          />
+        )}
         <Box sx={{ flex: 1, overflow: 'hidden' }}>
           <Text sx={{ fontWeight: 'bold', fontSize: 2, color: '#e6edf3', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {session.name || session.summary || session.id.slice(0, 12)}
