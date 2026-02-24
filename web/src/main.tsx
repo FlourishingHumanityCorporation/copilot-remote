@@ -5,7 +5,7 @@ import App from './App';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemeProvider colorMode="night">
+    <ThemeProvider colorMode="night" nightScheme="dark_dimmed">
       <BaseStyles>
         <App />
       </BaseStyles>
