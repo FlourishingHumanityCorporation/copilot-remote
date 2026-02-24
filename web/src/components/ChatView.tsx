@@ -85,10 +85,10 @@ export function ChatView({ session, messages, onSend, onResume }: Props) {
       {/* Session header */}
       <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
         <Box sx={{ flex: 1, overflow: 'hidden' }}>
-          <Text sx={{ fontWeight: 'bold', fontSize: 1, color: 'fg.default', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Text sx={{ fontWeight: 'bold', fontSize: 2, color: '#e6edf3', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {session.name || session.summary || session.id.slice(0, 12)}
           </Text>
-          <Text sx={{ color: 'fg.muted', fontSize: 0 }}>{session.cwd}</Text>
+          <Text sx={{ color: '#8b949e', fontSize: 0 }}>{session.cwd}</Text>
         </Box>
         <Label variant={isLive ? 'success' : 'secondary'}>
           {isRunning ? 'running' : isActive ? 'active' : 'ended'}
