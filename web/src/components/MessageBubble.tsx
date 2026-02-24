@@ -41,12 +41,8 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
             : 'border.default',
         }}
       >
-        <Box sx={{ fontSize: 1, color: 'fg.default', '& p': { m: 0, mb: 1 }, '& p:last-child': { mb: 0 }, '& pre': { bg: 'canvas.inset', p: 2, borderRadius: 2, overflow: 'auto', fontSize: 0 }, '& code': { bg: 'canvas.inset', px: 1, borderRadius: 1, fontSize: '85%' } }}>
-          {!isUser && (
-            <Text sx={{ fontSize: '11px', color: 'fg.muted', fontWeight: 'bold', mr: 1 }}>
-              {isSystem ? '⚙️' : '🤖'}
-            </Text>
-          )}
+        <Box sx={{ fontSize: 1, color: '#e6edf3', '& p': { m: 0, mb: 1 }, '& p:last-child': { mb: 0 }, '& p:first-of-type': { display: 'inline' }, '& pre': { bg: 'canvas.inset', p: 2, borderRadius: 2, overflow: 'auto', fontSize: 0 }, '& code': { bg: 'canvas.inset', px: 1, borderRadius: 1, fontSize: '85%' } }}>
+          {!isUser && <span style={{ fontSize: '12px', marginRight: 4, verticalAlign: 'middle' }}>{isSystem ? '⚙️' : '🤖'}</span>}
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </Box>
         <Text sx={{ fontSize: '10px', color: 'fg.muted', display: 'block', textAlign: isUser ? 'right' : 'left', mt: '2px' }}>
