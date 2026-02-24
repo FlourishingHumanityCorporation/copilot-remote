@@ -4,7 +4,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { URL } from 'url';
 import { getOrCreateToken, authMiddleware, validateWsToken } from './auth.js';
 import { sessionManager } from './session-manager.js';
-import { listHistoricalSessions, getSessionDetail } from './session-store.js';
+import { listHistoricalSessions, getSessionDetail, getSessionMessages } from './session-store.js';
 import type { WsMessage, WsServerMessage } from './types.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
@@ -53,7 +53,8 @@ app.get('/api/sessions/:id', (req, res) => {
   // Check historical
   const historical = getSessionDetail(req.params.id);
   if (historical) {
-    res.json({ ...historical, messages: [] });
+    const messages = getSessionMessages(req.params.id);
+    res.json({ ...historical, messages: messages.slice(-200) });
     return;
   }
   res.status(404).json({ error: 'Session not found' });
@@ -137,6 +138,13 @@ sessionManager.on('status', (sessionId: string, status: string) => {
 });
 
 sessionManager.on('message', (sessionId: string, message: any) => {
+  broadcast(sessionId, { type: 'message', sessionId, message });
+});
+
+// Watch events.jsonl files for live CLI sessions
+import { watchSessionEvents } from './session-watcher.js';
+
+const sessionWatcher = watchSessionEvents((sessionId, message) => {
   broadcast(sessionId, { type: 'message', sessionId, message });
 });
 

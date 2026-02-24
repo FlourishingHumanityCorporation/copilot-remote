@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync, statSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
-import type { Session } from './types.js';
+import type { Session, ChatMessage } from './types.js';
 
 const SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
 
@@ -76,4 +76,42 @@ export function getSessionDetail(sessionId: string): Session | null {
   } catch {
     return null;
   }
+}
+
+export function getSessionMessages(sessionId: string): ChatMessage[] {
+  const eventsPath = join(SESSION_STATE_DIR, sessionId, 'events.jsonl');
+  if (!existsSync(eventsPath)) return [];
+
+  const messages: ChatMessage[] = [];
+  try {
+    const raw = readFileSync(eventsPath, 'utf-8');
+    const lines = raw.split('\n').filter(l => l.trim());
+
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'user.message' && event.data?.content) {
+          messages.push({
+            id: event.id || '',
+            role: 'user',
+            content: event.data.content,
+            timestamp: event.timestamp || event.data?.timestamp || '',
+          });
+        } else if (event.type === 'assistant.message' && event.data?.content) {
+          messages.push({
+            id: event.data.messageId || event.id || '',
+            role: 'copilot',
+            content: event.data.content,
+            timestamp: event.timestamp || '',
+          });
+        }
+      } catch {
+        // Skip malformed lines
+      }
+    }
+  } catch {
+    // Events file unreadable
+  }
+
+  return messages;
 }
