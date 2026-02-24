@@ -54,9 +54,9 @@ export function ChatView({ session, messages, onSend }: Props) {
   }, [session.id]);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
       {/* Session header */}
-      <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', gap: 2 }}>
+      <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
         <Box sx={{ flex: 1, overflow: 'hidden' }}>
           <Text sx={{ fontWeight: 'bold', fontSize: 1, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {session.summary || session.id.slice(0, 12)}
@@ -77,8 +77,17 @@ export function ChatView({ session, messages, onSend }: Props) {
         )}
       </Box>
 
-      {/* Messages area */}
-      <Box ref={scrollRef} sx={{ flex: 1, overflow: 'auto', py: 3 }}>
+      {/* Messages area — use overflow-y scroll with explicit constraints */}
+      <Box
+        ref={scrollRef}
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          py: 3,
+        }}
+      >
         {allMessages.length === 0 && (
           <Box sx={{ textAlign: 'center', py: 6 }}>
             <Text sx={{ color: 'fg.muted', fontSize: 1 }}>

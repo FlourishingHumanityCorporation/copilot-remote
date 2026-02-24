@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Box, PageLayout, Text } from '@primer/react';
+import { Box, Text } from '@primer/react';
 import { SessionList } from './components/SessionList';
 import { ChatView } from './components/ChatView';
 import { ConnectionStatus } from './components/ConnectionStatus';
@@ -66,8 +66,8 @@ export default function App() {
         <ConnectionStatus connected={connected} />
       </Box>
 
-      <PageLayout sx={{ flex: 1, overflow: 'hidden' }}>
-        <PageLayout.Pane position="start" width="small" sx={{ overflow: 'auto' }}>
+      <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
+        <Box sx={{ width: 300, minWidth: 250, borderRight: '1px solid', borderColor: 'border.default', overflowY: 'auto' }}>
           <SessionList
             sessions={sessions}
             loading={loading}
@@ -77,8 +77,8 @@ export default function App() {
             onNew={handleNewSession}
             onRefresh={refresh}
           />
-        </PageLayout.Pane>
-        <PageLayout.Content sx={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        </Box>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
           {activeSession ? (
             <ChatView
               session={activeSession}
@@ -90,8 +90,8 @@ export default function App() {
               <Text sx={{ color: 'fg.muted', fontSize: 1 }}>Select a session or create a new one</Text>
             </Box>
           )}
-        </PageLayout.Content>
-      </PageLayout>
+        </Box>
+      </Box>
 
       {showNewSession && (
         <NewSessionDialog
