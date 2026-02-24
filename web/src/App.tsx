@@ -15,6 +15,7 @@ export default function App() {
   );
   const [messages, setMessages] = useState<Map<string, ChatMessage[]>>(new Map());
   const [showNewSession, setShowNewSession] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
 
   const handleWsMessage = useCallback((msg: WsMessage) => {
     if (msg.type === 'message' && msg.sessionId && msg.message) {
@@ -37,12 +38,15 @@ export default function App() {
     }
   }, [connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const isMobile = window.innerWidth < 768;
+
   const handleSelectSession = useCallback((id: string) => {
     if (activeSessionId) unsubscribe(activeSessionId);
     setActiveSessionId(id);
     localStorage.setItem('copilot-remote-active-session', id);
     subscribe(id);
-  }, [activeSessionId, subscribe, unsubscribe]);
+    if (isMobile) setShowSidebar(false);
+  }, [activeSessionId, subscribe, unsubscribe, isMobile]);
 
   const handleSendMessage = useCallback((text: string) => {
     if (activeSessionId) {
@@ -88,32 +92,37 @@ export default function App() {
       </Box>
 
       <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
-        <Box sx={{ width: 300, minWidth: 250, borderRight: '1px solid', borderColor: 'border.default', overflowY: 'auto' }}>
-          <SessionList
-            sessions={sessions}
-            loading={loading}
-            error={error}
-            activeId={activeSessionId}
-            onSelect={handleSelectSession}
-            onNew={handleNewSession}
-            onRefresh={refresh}
-            onEditingChange={setPaused}
-          />
-        </Box>
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
-          {activeSession ? (
-            <ChatView
-              session={activeSession}
-              messages={activeMessages}
-              onSend={handleSendMessage}
-              onResume={handleResumeSession}
+        {(!isMobile || showSidebar) && (
+          <Box sx={{ width: isMobile ? '100%' : 300, minWidth: isMobile ? undefined : 250, borderRight: isMobile ? 'none' : '1px solid', borderColor: 'border.default', overflowY: 'auto' }}>
+            <SessionList
+              sessions={sessions}
+              loading={loading}
+              error={error}
+              activeId={activeSessionId}
+              onSelect={handleSelectSession}
+              onNew={handleNewSession}
+              onRefresh={refresh}
+              onEditingChange={setPaused}
             />
-          ) : (
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-              <Text sx={{ color: 'fg.muted', fontSize: 1 }}>Select a session or create a new one</Text>
-            </Box>
-          )}
-        </Box>
+          </Box>
+        )}
+        {(!isMobile || !showSidebar) && (
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+            {activeSession ? (
+              <ChatView
+                session={activeSession}
+                messages={activeMessages}
+                onSend={handleSendMessage}
+                onResume={handleResumeSession}
+                onBack={isMobile ? () => setShowSidebar(true) : undefined}
+              />
+            ) : (
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
+                <Text sx={{ color: 'fg.muted', fontSize: 1 }}>Select a session or create a new one</Text>
+              </Box>
+            )}
+          </Box>
+        )}
       </Box>
 
       {showNewSession && (
