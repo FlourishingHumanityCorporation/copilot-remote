@@ -106,11 +106,7 @@ wss.on('connection', (ws, req) => {
             sessionManager.sendInput(msg.sessionId, msg.text);
           }
           break;
-        case 'resize':
-          if (msg.sessionId && msg.cols && msg.rows) {
-            sessionManager.resize(msg.sessionId, msg.cols, msg.rows);
-          }
-          break;
+
       }
     } catch {
       // Ignore malformed messages

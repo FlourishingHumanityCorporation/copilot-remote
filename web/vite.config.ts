@@ -1,8 +1,13 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
+  root: __dirname,
   plugins: [
     react(),
     VitePWA({
@@ -22,6 +27,10 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    outDir: path.resolve(__dirname, '..', 'dist'),
+    emptyOutDir: true,
+  },
   server: {
     port: 5173,
     host: true,

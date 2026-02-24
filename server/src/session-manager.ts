@@ -1,21 +1,12 @@
 import { EventEmitter } from 'events';
+import { spawn, ChildProcess } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import type { Session, ChatMessage } from './types.js';
 import { listHistoricalSessions } from './session-store.js';
 
-// node-pty is a native module — dynamic import for resilience
-let ptyModule: typeof import('node-pty') | null = null;
-
-async function getPty() {
-  if (!ptyModule) {
-    ptyModule = await import('node-pty');
-  }
-  return ptyModule;
-}
-
 interface ManagedSession {
   session: Session;
-  pty: import('node-pty').IPty | null;
+  proc: ChildProcess | null;
   messages: ChatMessage[];
   buffer: string;
 }
@@ -26,7 +17,6 @@ class SessionManager extends EventEmitter {
   getAllSessions(): Session[] {
     const running = Array.from(this.sessions.values()).map(s => s.session);
     const historical = listHistoricalSessions();
-    // Merge: running sessions first, then historical (excluding running ones)
     const runningIds = new Set(running.map(s => s.id));
     const merged = [
       ...running,
@@ -44,7 +34,6 @@ class SessionManager extends EventEmitter {
   }
 
   async createSession(opts: { prompt?: string; cwd?: string; resume?: string }): Promise<Session> {
-    const pty = await getPty();
     const id = opts.resume || uuidv4();
 
     const args: string[] = [];
@@ -55,15 +44,13 @@ class SessionManager extends EventEmitter {
       args.push('-p', opts.prompt);
     }
 
-    const copilotPath = 'copilot';
+    const copilotPath = process.env.COPILOT_PATH || 'copilot';
     const cwd = opts.cwd || process.env.HOME || '/';
 
-    const ptyProcess = pty.spawn(copilotPath, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 40,
+    const proc = spawn(copilotPath, args, {
       cwd,
-      env: { ...process.env } as Record<string, string>,
+      env: process.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     const session: Session = {
@@ -72,44 +59,59 @@ class SessionManager extends EventEmitter {
       status: 'running',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      pid: ptyProcess.pid,
+      pid: proc.pid,
     };
 
     const managed: ManagedSession = {
       session,
-      pty: ptyProcess,
+      proc,
       messages: [],
       buffer: '',
     };
 
     this.sessions.set(id, managed);
 
-    // Stream PTY output
-    ptyProcess.onData((data: string) => {
-      managed.buffer += data;
+    const handleData = (data: Buffer) => {
+      const text = data.toString();
+      managed.buffer += text;
       managed.session.updatedAt = new Date().toISOString();
-      this.emit('output', id, data);
-
-      // Parse into messages periodically
+      this.emit('output', id, text);
       this.parseBuffer(managed);
-    });
+    };
 
-    ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+    proc.stdout?.on('data', handleData);
+    proc.stderr?.on('data', handleData);
+
+    proc.on('exit', (exitCode) => {
       managed.session.status = 'exited';
-      managed.pty = null;
+      managed.proc = null;
       this.emit('status', id, 'exited');
 
       const sysMsg: ChatMessage = {
         id: uuidv4(),
         role: 'system',
-        content: `Session exited with code ${exitCode}`,
+        content: `Session exited with code ${exitCode ?? 'unknown'}`,
         timestamp: new Date().toISOString(),
       };
       managed.messages.push(sysMsg);
       this.emit('message', id, sysMsg);
     });
 
-    // Add initial system message
+    proc.on('error', (err) => {
+      managed.session.status = 'exited';
+      managed.proc = null;
+      this.emit('status', id, 'exited');
+
+      const sysMsg: ChatMessage = {
+        id: uuidv4(),
+        role: 'system',
+        content: `Failed to start: ${err.message}`,
+        timestamp: new Date().toISOString(),
+      };
+      managed.messages.push(sysMsg);
+      this.emit('message', id, sysMsg);
+    });
+
     if (opts.prompt) {
       const userMsg: ChatMessage = {
         id: uuidv4(),
@@ -126,9 +128,9 @@ class SessionManager extends EventEmitter {
 
   sendInput(id: string, text: string): boolean {
     const managed = this.sessions.get(id);
-    if (!managed?.pty) return false;
+    if (!managed?.proc?.stdin?.writable) return false;
 
-    managed.pty.write(text + '\n');
+    managed.proc.stdin.write(text + '\n');
 
     const userMsg: ChatMessage = {
       id: uuidv4(),
@@ -144,21 +146,12 @@ class SessionManager extends EventEmitter {
 
   killSession(id: string): boolean {
     const managed = this.sessions.get(id);
-    if (!managed?.pty) return false;
-    managed.pty.kill();
+    if (!managed?.proc) return false;
+    managed.proc.kill('SIGTERM');
     return true;
   }
 
-  resize(id: string, cols: number, rows: number): void {
-    const managed = this.sessions.get(id);
-    if (managed?.pty) {
-      managed.pty.resize(cols, rows);
-    }
-  }
-
   private parseBuffer(managed: ManagedSession): void {
-    // Simple heuristic: accumulate output, emit as copilot message
-    // when we detect a pause (debounced via timeout)
     if ((managed as any)._parseTimeout) {
       clearTimeout((managed as any)._parseTimeout);
     }
@@ -182,7 +175,6 @@ class SessionManager extends EventEmitter {
   }
 }
 
-// Strip ANSI escape codes
 function stripAnsi(str: string): string {
   return str.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
             .replace(/\x1B\][^\x07]*\x07/g, '')
