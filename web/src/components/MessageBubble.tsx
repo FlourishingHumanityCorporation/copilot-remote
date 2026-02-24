@@ -11,19 +11,22 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
 
+  const time = new Date(message.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
   return (
     <Box
       sx={{
         display: 'flex',
         justifyContent: isUser ? 'flex-end' : 'flex-start',
-        mb: 2,
+        mb: 1,
         px: 2,
       }}
     >
       <Box
         sx={{
           maxWidth: '85%',
-          p: 3,
+          px: '10px',
+          py: '6px',
           borderRadius: 2,
           bg: isUser
             ? 'accent.subtle'
@@ -38,16 +41,16 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
             : 'border.default',
         }}
       >
-        {!isUser && (
-          <Text sx={{ fontSize: 0, color: 'fg.muted', mb: 1, display: 'block', fontWeight: 'bold' }}>
-            {isSystem ? '⚙️ System' : '🤖 Copilot'}
-          </Text>
-        )}
-        <Box sx={{ fontSize: 1, color: 'fg.default', '& p': { m: 0, mb: 2 }, '& p:last-child': { mb: 0 }, '& pre': { bg: 'canvas.inset', p: 2, borderRadius: 2, overflow: 'auto', fontSize: 0 }, '& code': { bg: 'canvas.inset', px: 1, borderRadius: 1, fontSize: '85%' } }}>
+        <Box sx={{ fontSize: 1, color: 'fg.default', '& p': { m: 0, mb: 1 }, '& p:last-child': { mb: 0 }, '& pre': { bg: 'canvas.inset', p: 2, borderRadius: 2, overflow: 'auto', fontSize: 0 }, '& code': { bg: 'canvas.inset', px: 1, borderRadius: 1, fontSize: '85%' } }}>
+          {!isUser && (
+            <Text sx={{ fontSize: '11px', color: 'fg.muted', fontWeight: 'bold', mr: 1 }}>
+              {isSystem ? '⚙️' : '🤖'}
+            </Text>
+          )}
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </Box>
-        <Text sx={{ fontSize: 0, color: 'fg.muted', mt: 1, display: 'block', textAlign: isUser ? 'right' : 'left' }}>
-          {new Date(message.timestamp).toLocaleTimeString()}
+        <Text sx={{ fontSize: '10px', color: 'fg.muted', display: 'block', textAlign: isUser ? 'right' : 'left', mt: '2px' }}>
+          {time}
         </Text>
       </Box>
     </Box>
