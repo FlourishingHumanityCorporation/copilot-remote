@@ -108,6 +108,10 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
       {error && <Text sx={{ color: 'danger.fg', fontSize: 0 }}>{error}</Text>}
 
       <ActionList>
+        <ActionList.Group>
+          <ActionList.GroupHeading sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            ⚡ Copilot
+          </ActionList.GroupHeading>
         {sessions.map(session => (
           <ActionList.Item
             key={session.id}
@@ -203,6 +207,10 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
             No sessions found
           </Text>
         )}
+        </ActionList.Group>
+
+        {/* Future: Claude, Gemini, etc. groups go here */}
+
       </ActionList>
     </Box>
   );
