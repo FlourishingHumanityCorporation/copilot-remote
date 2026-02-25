@@ -142,7 +142,11 @@ wss.on('connection', (ws, req) => {
           break;
         case 'input':
           if (msg.sessionId && msg.text) {
-            sessionManager.sendInput(msg.sessionId, msg.text);
+            const sent = sessionManager.sendInput(msg.sessionId, msg.text);
+            if (!sent) {
+              // Not managed — resume with the prompt
+              sessionManager.createSession({ resume: msg.sessionId, prompt: msg.text });
+            }
           }
           break;
 
