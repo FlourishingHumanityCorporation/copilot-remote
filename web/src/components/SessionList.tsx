@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { Box, Text, ActionList, Button, Spinner, Label, RelativeTime, TextInput } from '@primer/react';
-import { PlusIcon, SyncIcon, PencilIcon, XIcon, TagIcon } from '@primer/octicons-react';
+import { PlusIcon, SyncIcon, PencilIcon, XIcon, TagIcon, ChevronDownIcon, ChevronRightIcon } from '@primer/octicons-react';
 import { api } from '../lib/api';
 import type { Session } from '../types';
 
@@ -34,6 +34,7 @@ interface Props {
 
 export function SessionList({ sessions, loading, error, activeId, onSelect, onNew, onRefresh, onEditingChange }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [copilotCollapsed, setCopilotCollapsed] = useState(false);
   const [editName, setEditName] = useState('');
   const [addingTagId, setAddingTagId] = useState<string | null>(null);
   const [newTag, setNewTag] = useState('');
@@ -109,10 +110,11 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
 
       <ActionList>
         <ActionList.Group>
-          <ActionList.GroupHeading as="h3" sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            ⚡ Copilot
+          <ActionList.GroupHeading as="h3" sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' }} onClick={() => setCopilotCollapsed(!copilotCollapsed)}>
+            {copilotCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}{' '}
+            ⚡ Copilot ({sessions.length})
           </ActionList.GroupHeading>
-        {sessions.map(session => (
+        {!copilotCollapsed && sessions.map(session => (
           <ActionList.Item
             key={session.id}
             active={session.id === activeId}
@@ -202,7 +204,7 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
             </Box>
           </ActionList.Item>
         ))}
-        {!loading && sessions.length === 0 && (
+        {!copilotCollapsed && !loading && sessions.length === 0 && (
           <Text sx={{ color: 'fg.muted', fontSize: 1, p: 3, textAlign: 'center', display: 'block' }}>
             No sessions found
           </Text>

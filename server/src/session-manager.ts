@@ -36,6 +36,13 @@ class SessionManager extends EventEmitter {
   async createSession(opts: { prompt?: string; cwd?: string; resume?: string }): Promise<Session> {
     const id = opts.resume || uuidv4();
 
+    // Kill existing managed process if any
+    const existing = this.sessions.get(id);
+    if (existing?.proc) {
+      try { existing.proc.kill(); } catch {}
+      existing.proc = null;
+    }
+
     const args: string[] = [];
     if (opts.resume) {
       args.push('--resume', opts.resume);
@@ -128,7 +135,13 @@ class SessionManager extends EventEmitter {
 
   sendInput(id: string, text: string): boolean {
     const managed = this.sessions.get(id);
-    if (!managed?.proc?.stdin?.writable) return false;
+    if (!managed) return false;
+
+    // If the process is dead or stdin not writable, re-resume with new prompt
+    if (!managed.proc?.stdin?.writable) {
+      this.createSession({ resume: id, prompt: text });
+      return true;
+    }
 
     managed.proc.stdin.write(text + '\n');
 
