@@ -54,20 +54,23 @@ app.get('/api/sessions/:id', (req, res) => {
   const sessionMeta = meta[req.params.id] || {};
 
   const managed = sessionManager.getSession(req.params.id);
+  // Always try to load historical messages from events.jsonl
+  const historical = getSessionDetail(req.params.id);
+  const historicalMessages = getSessionMessages(req.params.id);
+
   if (managed) {
+    // Merge: historical messages + any in-memory messages from PTY
+    const allMessages = historicalMessages.length > 0 ? historicalMessages : managed.messages;
     res.json({
       ...managed.session,
       name: sessionMeta.name,
       tags: sessionMeta.tags || [],
-      messages: managed.messages.slice(-100),
+      messages: allMessages.slice(-500),
     });
     return;
   }
-  // Check historical
-  const historical = getSessionDetail(req.params.id);
   if (historical) {
-    const messages = getSessionMessages(req.params.id);
-    res.json({ ...historical, name: sessionMeta.name, tags: sessionMeta.tags || [], messages: messages.slice(-500) });
+    res.json({ ...historical, name: sessionMeta.name, tags: sessionMeta.tags || [], messages: historicalMessages.slice(-500) });
     return;
   }
   res.status(404).json({ error: 'Session not found' });
