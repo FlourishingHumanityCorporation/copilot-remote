@@ -112,7 +112,10 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
         <ActionList.Group>
           <ActionList.GroupHeading as="h3" sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px', cursor: 'pointer', userSelect: 'none' }} onClick={() => setCopilotCollapsed(!copilotCollapsed)}>
             {copilotCollapsed ? <ChevronRightIcon size={12} /> : <ChevronDownIcon size={12} />}{' '}
-            ⚡ Copilot ({sessions.length})
+            ⚡ Copilot{' '}
+            <span style={{ fontWeight: 400 }}>
+              {sessions.filter(s => s.status === 'running' || s.status === 'active').length}/{sessions.length}
+            </span>
           </ActionList.GroupHeading>
         {!copilotCollapsed && sessions.map(session => (
           <ActionList.Item
