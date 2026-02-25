@@ -109,7 +109,7 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onNe
 
       <ActionList>
         <ActionList.Group>
-          <ActionList.GroupHeading sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <ActionList.GroupHeading as="h3" sx={{ fontSize: '11px', fontWeight: 600, color: 'fg.muted', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             ⚡ Copilot
           </ActionList.GroupHeading>
         {sessions.map(session => (
