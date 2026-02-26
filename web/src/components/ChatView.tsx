@@ -93,6 +93,7 @@ export function ChatView({ session, messages, onSend, onResume, onBack }: Props)
             {session.name || session.summary || session.id.slice(0, 12)}
           </Text>
           <Text sx={{ color: '#8b949e', fontSize: 0 }}>{session.cwd}</Text>
+          <Text sx={{ color: '#6e7681', fontSize: 0, fontFamily: 'mono' }}>{session.id}</Text>
         </Box>
         <Label variant={isLive ? 'success' : 'secondary'}>
           {isRunning ? 'running' : isActive ? 'active' : 'ended'}
