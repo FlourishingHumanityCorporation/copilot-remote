@@ -116,20 +116,31 @@ export function TerminalView({ onBack }: Props) {
     });
   }, []);
 
-  const addTab = useCallback(async () => {
+  const [aiClis, setAiClis] = useState<{ name: string; path: string }[]>([]);
+
+  // Fetch available AI CLIs on mount
+  useEffect(() => {
+    const { token, serverUrl } = getServerUrls();
+    fetch(`${serverUrl}/api/ai-clis`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => setAiClis(data))
+      .catch(() => {});
+  }, []);
+
+  const addTab = useCallback(async (aiCli?: string) => {
     const { token, serverUrl } = getServerUrls();
     try {
       const res = await fetch(`${serverUrl}/api/terminals`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ aiCli }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       const newTab: TermTab = {
         id: data.id,
         tmuxSession: data.tmuxSession || '',
-        name: `Terminal ${tabsRef.current.length + 1}`,
+        name: aiCli || `Terminal ${tabsRef.current.length + 1}`,
         checked: false,
       };
       setTabs(prev => [...prev, newTab]);
@@ -204,9 +215,20 @@ export function TerminalView({ onBack }: Props) {
     setTabs(prev => prev.map(t => t.id === id ? { ...t, checked: !t.checked } : t));
   }, []);
 
-  // Create first tab on mount
+  // Create first tab on mount — auto-launch first available AI CLI
+  const mountedRef = useRef(false);
   useEffect(() => {
-    addTab();
+    if (mountedRef.current) return;
+    mountedRef.current = true;
+    // Wait for aiClis to load, then create with preferred CLI
+    const { token, serverUrl } = getServerUrls();
+    fetch(`${serverUrl}/api/ai-clis`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then((clis: { name: string }[]) => {
+        const preferred = clis.length > 0 ? clis[0].name : undefined;
+        addTab(preferred);
+      })
+      .catch(() => addTab());
     return () => {
       for (const [, inst] of termInstances) {
         inst.ws?.close();
@@ -374,7 +396,25 @@ export function TerminalView({ onBack }: Props) {
             </ActionList>
           </ActionMenu.Overlay>
         </ActionMenu>
-        <IconButton icon={PlusIcon} aria-label="New terminal" variant="invisible" size="small" sx={{ mx: 1, flexShrink: 0 }} onClick={addTab} />
+        <ActionMenu>
+          <ActionMenu.Anchor>
+            <IconButton icon={PlusIcon} aria-label="New terminal" variant="invisible" size="small" sx={{ mx: 1, flexShrink: 0 }} />
+          </ActionMenu.Anchor>
+          <ActionMenu.Overlay>
+            <ActionList>
+              <ActionList.GroupHeading as="h3">New terminal</ActionList.GroupHeading>
+              {aiClis.map(cli => (
+                <ActionList.Item key={cli.name} onSelect={() => addTab(cli.name)}>
+                  {cli.name === 'copilot' ? '🤖' : '🧠'} {cli.name}
+                </ActionList.Item>
+              ))}
+              <ActionList.Divider />
+              <ActionList.Item onSelect={() => addTab()}>
+                💻 Shell
+              </ActionList.Item>
+            </ActionList>
+          </ActionMenu.Overlay>
+        </ActionMenu>
       </Box>
 
       {/* Terminal area */}

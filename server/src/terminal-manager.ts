@@ -17,10 +17,24 @@ const TMUX_PATH = (() => {
   try { return execSync('which tmux', { encoding: 'utf8' }).trim(); } catch { return null; }
 })();
 
+/** Detect available AI CLI tools */
+function detectAiClis(): { name: string; path: string }[] {
+  const clis: { name: string; path: string }[] = [];
+  for (const name of ['copilot', 'claude']) {
+    try {
+      const p = execSync(`which ${name}`, { encoding: 'utf8' }).trim();
+      if (p) clis.push({ name, path: p });
+    } catch { /* not installed */ }
+  }
+  return clis;
+}
+
+const AI_CLIS = detectAiClis();
+
 class TerminalManager extends EventEmitter {
   private terminals = new Map<string, Terminal>();
 
-  create(id: string, cwd?: string): Terminal {
+  create(id: string, cwd?: string, aiCli?: string): Terminal {
     if (this.terminals.has(id)) {
       return this.terminals.get(id)!;
     }
@@ -52,6 +66,14 @@ class TerminalManager extends EventEmitter {
         cwd: resolvedCwd,
         env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
       });
+    }
+
+    // Auto-launch AI CLI after shell is ready
+    if (aiCli) {
+      const cli = AI_CLIS.find(c => c.name === aiCli);
+      if (cli) {
+        setTimeout(() => term.write(`${cli.name}\r`), 500);
+      }
     }
 
     const terminal: Terminal = {
@@ -166,6 +188,10 @@ class TerminalManager extends EventEmitter {
 
   get(id: string) {
     return this.terminals.get(id);
+  }
+
+  listAiClis() {
+    return AI_CLIS;
   }
 
   list() {
