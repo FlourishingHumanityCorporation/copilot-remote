@@ -234,14 +234,18 @@ app.get('/api/terminals', (_req, res) => {
 
 app.post('/api/terminals', (req, res) => {
   try {
-    const { cwd } = req.body || {};
+    const { cwd, aiCli } = req.body || {};
     const id = `term-${Date.now()}`;
-    const terminal = terminalManager.create(id, cwd);
+    const terminal = terminalManager.create(id, cwd, aiCli);
     res.status(201).json({ id: terminal.id, cwd: terminal.cwd, createdAt: terminal.createdAt, tmuxSession: terminal.tmuxSession });
   } catch (err: any) {
     console.error('[Terminal] Failed to create:', err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/ai-clis', (_req, res) => {
+  res.json(terminalManager.listAiClis());
 });
 
 app.post('/api/terminals/attach', (req, res) => {
