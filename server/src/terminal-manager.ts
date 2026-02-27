@@ -222,11 +222,29 @@ class TerminalManager extends EventEmitter {
   /** Re-adopt orphaned cr-* tmux sessions from a previous server run */
   reAdoptOrphanedSessions(): number {
     if (!TMUX_PATH) return 0;
-    const sessions = this.listTmuxSessions().filter(s => s.startsWith('cr-'));
+    // Get session names and their groups
+    let sessionInfo: { name: string; group: string }[] = [];
+    try {
+      const out = execSync(`${TMUX_PATH} list-sessions -F "#{session_name}\t#{session_group}"`, { encoding: 'utf8' });
+      sessionInfo = out.trim().split('\n').filter(Boolean).map(line => {
+        const [name, group] = line.split('\t');
+        return { name, group: group || '' };
+      });
+    } catch { return 0; }
+
     let adopted = 0;
-    for (const s of sessions) {
+    for (const { name: s, group } of sessionInfo) {
+      if (!s.startsWith('cr-')) continue;
       // Skip if already managed
       if (Array.from(this.terminals.values()).some(t => t.tmuxSession === s)) continue;
+      // Kill stale grouped sessions (created by previous attach() calls)
+      if (group) {
+        try {
+          execSync(`${TMUX_PATH} kill-session -t "${s}"`, { stdio: 'ignore' });
+          console.log(`[Terminal] Killed stale grouped session: ${s} (group: ${group})`);
+        } catch {}
+        continue;
+      }
       const id = `term-${s.replace('cr-', '')}`;
       try {
         // Directly attach to the existing session (no grouped session)
