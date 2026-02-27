@@ -599,6 +599,7 @@ export function TerminalView({ onBack }: Props) {
           {tabs.map(tab => {
             const inst = termInstances.get(tab.id);
             const isConnected = inst?.connected ?? false;
+            const hasConnected = !!inst; // true if WS was ever created
             return (
               <Box
                 key={tab.id}
@@ -626,7 +627,7 @@ export function TerminalView({ onBack }: Props) {
                   onClick={(e: React.MouseEvent) => { e.stopPropagation(); toggleCheck(tab.id); if (!tileMode) setActiveTabId(tab.id); }}
                   sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, overflow: 'hidden' }}
                 >
-                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bg: isConnected ? 'success.fg' : 'danger.fg' }} />
+                  <Box sx={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bg: isConnected ? 'success.fg' : hasConnected ? 'danger.fg' : 'fg.muted' }} />
                   <Text sx={{ fontSize: '11px', color: 'fg.default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'mono' }}>
                     {tab.name}
                   </Text>
@@ -747,7 +748,7 @@ export function TerminalView({ onBack }: Props) {
                 borderBottom: focusedTileId === tab.id ? '1px solid #388bfd' : '1px solid #21262d',
                 display: 'flex', alignItems: 'center', gap: 4,
               }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: termInstances.get(tab.id)?.connected ? '#3fb950' : '#f85149' }} />
+                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: termInstances.get(tab.id)?.connected ? '#3fb950' : termInstances.has(tab.id) ? '#f85149' : '#6e7681' }} />
                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: focusedTileId === tab.id ? '#ffffff' : '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {tab.name}
                 </span>
