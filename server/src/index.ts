@@ -289,6 +289,11 @@ app.delete('/api/tmux-sessions/:name', (req, res) => {
   res.json({ killed });
 });
 
+app.get('/api/tmux-sessions/:name/title', (req, res) => {
+  const title = terminalManager.getTmuxPaneTitle(req.params.name);
+  res.json({ title });
+});
+
 // Terminal WebSocket — separate path for raw PTY I/O
 const termWss = new WebSocketServer({ noServer: true });
 

@@ -24,6 +24,7 @@ interface TermTab {
   name: string;
   checked: boolean;
   userRenamed?: boolean;
+  lastIntent?: string;
 }
 
 const termInstances = new Map<string, {
@@ -87,7 +88,7 @@ function uniqueName(baseName: string, existingNames: string[]): string {
   return `${baseName}-${i}`;
 }
 
-const TERM_OPTS: ConstructorParameters<typeof Terminal>[0] = {
+const TERM_OPTS: NonNullable<ConstructorParameters<typeof Terminal>[0]> = {
   cursorBlink: true,
   fontSize: 14,
   fontFamily: '"MesloLGS NF", "Cascadia Code", "Fira Code", "SF Mono", monospace',
@@ -211,6 +212,12 @@ export function TerminalView({ onBack }: Props) {
 
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    });
+
+    term.onTitleChange((title) => {
+      if (title) {
+        setTabs(prev => prev.map(t => t.id === tabId ? { ...t, lastIntent: title } : t));
+      }
     });
 
     term.onResize(({ cols, rows }) => {
@@ -408,6 +415,29 @@ export function TerminalView({ onBack }: Props) {
         }
       } catch {}
     }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Poll tmux pane titles for all tabs (catches titles set before we connected)
+  useEffect(() => {
+    const fetchTitles = async () => {
+      const { token, serverUrl } = getServerUrls();
+      const current = tabsRef.current;
+      for (const tab of current) {
+        if (!tab.tmuxSession) continue;
+        try {
+          const res = await fetch(`${serverUrl}/api/tmux-sessions/${encodeURIComponent(tab.tmuxSession)}/title`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const { title } = await res.json();
+          if (title && title !== tab.lastIntent) {
+            setTabs(prev => prev.map(t => t.id === tab.id ? { ...t, lastIntent: title } : t));
+          }
+        } catch {}
+      }
+    };
+    fetchTitles();
+    const interval = setInterval(fetchTitles, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -717,6 +747,7 @@ export function TerminalView({ onBack }: Props) {
             return (
               <Box
                 key={tab.id}
+                title={tab.lastIntent || tab.name}
                 sx={{
                   display: 'flex', alignItems: 'center', gap: 1,
                   px: 2, py: '5px',
@@ -924,6 +955,11 @@ export function TerminalView({ onBack }: Props) {
                 <span style={{ fontSize: 10, fontFamily: 'monospace', color: focusedTileId === tab.id ? '#ffffff' : '#8b949e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {tab.name}
                 </span>
+                {tab.lastIntent && (
+                  <span style={{ fontSize: 9, fontFamily: 'monospace', color: focusedTileId === tab.id ? '#a5d6ff' : '#58a6ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: 'italic' }}>
+                    — {tab.lastIntent}
+                  </span>
+                )}
                 {tab.tmuxSession && (
                   <>
                     <span style={{ fontSize: 9, color: focusedTileId === tab.id ? '#a5d6ff' : '#6e7681', fontFamily: 'monospace', marginLeft: 'auto', flexShrink: 0 }}>

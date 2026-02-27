@@ -172,6 +172,20 @@ class TerminalManager extends EventEmitter {
     }
   }
 
+  /** Get the pane title for a tmux session (set by escape sequences like \033]0;...\007) */
+  getTmuxPaneTitle(sessionName: string): string {
+    if (!TMUX_PATH) return '';
+    try {
+      const out = execSync(
+        `${TMUX_PATH} display-message -t "${sessionName}" -p "#{pane_title}"`,
+        { encoding: 'utf8', timeout: 2000 },
+      );
+      return out.trim();
+    } catch {
+      return '';
+    }
+  }
+
   write(id: string, data: string): boolean {
     const t = this.terminals.get(id);
     if (!t) return false;
