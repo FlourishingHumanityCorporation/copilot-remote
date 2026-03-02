@@ -6,6 +6,7 @@ import { Box, IconButton, Text, ActionMenu, ActionList } from '@primer/react';
 import { PlusIcon, XIcon, ArrowLeftIcon, AppsIcon, LinkIcon, PencilIcon, TrashIcon, ListUnorderedIcon, GlobeIcon } from '@primer/octicons-react';
 import { useTodoDispatcher } from '../hooks/useTodoDispatcher';
 import { useSwarmStatus } from '../hooks/useSwarmStatus';
+import { api } from '../lib/api';
 import TodoPanel from './TodoPanel';
 import SwarmPopover from './SwarmPopover';
 import '@xterm/xterm/css/xterm.css';
@@ -14,8 +15,17 @@ import '@xterm/xterm/css/xterm.css';
 const tileXtermStyles = document.createElement('style');
 tileXtermStyles.textContent = `
   .tile-xterm-container .xterm { height: 100% !important; width: 100% !important; }
-  .tile-xterm-container .xterm-viewport { overflow: hidden !important; }
   .tile-xterm-container .xterm-screen { width: 100% !important; }
+  .xterm-viewport { overflow-y: scroll !important; scrollbar-width: none !important; }
+  .xterm-viewport::-webkit-scrollbar { display: none !important; }
+  .drag-over-highlight { outline: 2px dashed #58a6ff !important; outline-offset: -2px; position: relative; }
+  .drag-over-highlight::after {
+    content: 'Drop image here';
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    color: #58a6ff; font-size: 14px; font-weight: 600;
+    pointer-events: none; z-index: 10; text-shadow: 0 0 8px rgba(0,0,0,0.8);
+    background: rgba(13, 17, 23, 0.7); padding: 8px 16px; border-radius: 6px;
+  }
 `;
 if (!document.head.querySelector('[data-tile-xterm]')) {
   tileXtermStyles.setAttribute('data-tile-xterm', '');
@@ -29,6 +39,7 @@ interface TermTab {
   checked: boolean;
   userRenamed?: boolean;
   lastIntent?: string;
+  lastCommand?: string;
 }
 
 const termInstances = new Map<string, {
@@ -84,6 +95,12 @@ function removeCachedTabName(tmuxSession: string) {
   saveTabNameCache(cache);
 }
 
+/** Check if a string is a tmux session identifier (not a meaningful tab name) */
+const TMUX_SESSION_ID_RE = /^cr-\d+$/;
+function isMeaningfulName(name: string): boolean {
+  return !!name && !TMUX_SESSION_ID_RE.test(name);
+}
+
 /** Generate a unique tab name given existing tab names */
 function uniqueName(baseName: string, existingNames: string[]): string {
   if (!existingNames.includes(baseName)) return baseName;
@@ -95,6 +112,8 @@ function uniqueName(baseName: string, existingNames: string[]): string {
 const CHECKED_TILES_KEY = 'copilot-remote-checked-tiles';
 const TILE_MODE_KEY = 'copilot-remote-tile-mode';
 const TODO_PANEL_KEY = 'copilot-remote-show-todo-panel';
+/** CSS class applied to terminal containers during image drag-over */
+const DRAG_OVER_CLASS = 'drag-over-highlight';
 
 /** Load saved checked tmux session names */
 function loadCheckedSessions(): Set<string> {
@@ -161,7 +180,10 @@ export function TerminalView({ onBack }: Props) {
   const getTermInstances = useCallback(() => termInstances, []);
 
   // Todo dispatcher hook
-  const todoDispatcher = useTodoDispatcher(getTermInstances, tabs);
+  // Use tileActive (not raw tileMode) so dispatch uses single-tab logic when
+  // tile mode is on but no tabs are checked (which renders single view).
+  const tileActive = tileMode && tabs.some(t => t.checked);
+  const todoDispatcher = useTodoDispatcher(getTermInstances, tabs, activeTabId, tileActive);
   const todoDispatcherRef = useRef(todoDispatcher);
   todoDispatcherRef.current = todoDispatcher;
 
@@ -223,7 +245,15 @@ export function TerminalView({ onBack }: Props) {
       try {
         const parsed = JSON.parse(e.data);
         if (parsed.type === 'command') {
-          setTabs(prev => prev.map(t => t.id === parsed.id && !t.userRenamed ? { ...t, name: parsed.command } : t));
+          setTabs(prev => prev.map(t => {
+            if (t.id !== parsed.id) return t;
+            const newName = t.userRenamed ? t.name : parsed.command;
+            // Cache the tab name so it survives browser refresh
+            if (t.tmuxSession && isMeaningfulName(newName)) {
+              setCachedTabName(t.tmuxSession, newName);
+            }
+            return { ...t, name: newName, lastCommand: parsed.command };
+          }));
           return;
         }
         if (parsed.type === 'exit') {
@@ -265,6 +295,15 @@ export function TerminalView({ onBack }: Props) {
         term.write('\r\n\x1b[33m[Disconnected]\x1b[0m\r\n');
       }
     };
+
+    // Let the browser handle Cmd+C/V/X/A (copy/paste/cut/select-all) natively
+    // instead of xterm sending them as control characters to the PTY
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      const isMac = navigator.platform.startsWith('Mac');
+      const mod = isMac ? e.metaKey : e.ctrlKey;
+      if (mod && ['c', 'v', 'x', 'a'].includes(e.key)) return false;
+      return true;
+    });
 
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
@@ -467,9 +506,11 @@ export function TerminalView({ onBack }: Props) {
               setTabs(prev => {
                 if (prev.some(t => t.tmuxSession === s)) return prev;
                 const cachedName = getCachedTabName(data.tmuxSession || s);
-                const name = cachedName || uniqueName(s, prev.map(t => t.name));
-                setCachedTabName(data.tmuxSession || s, name);
-                return [...prev, { id: data.id, tmuxSession: data.tmuxSession || s, name, checked: loadCheckedSessions().has(data.tmuxSession || s), userRenamed: !!cachedName }];
+                const meaningfulCached = cachedName && isMeaningfulName(cachedName) ? cachedName : null;
+                const fallbackName = isMeaningfulName(s) ? s : `Shell ${prev.length + 1}`;
+                const name = meaningfulCached || uniqueName(fallbackName, prev.map(t => t.name));
+                if (isMeaningfulName(name)) setCachedTabName(data.tmuxSession || s, name);
+                return [...prev, { id: data.id, tmuxSession: data.tmuxSession || s, name, checked: loadCheckedSessions().has(data.tmuxSession || s), userRenamed: !!meaningfulCached }];
               });
             }
           }
@@ -555,16 +596,21 @@ export function TerminalView({ onBack }: Props) {
            const savedChecked = loadCheckedSessions();
           const restored: TermTab[] = unique.map((t, i) => {
             const cached = getCachedTabName(t.tmuxSession);
-            const baseName = cached || t.lastCommand || t.tmuxSession || `Shell ${i + 1}`;
+            // Only use cached/lastCommand/tmuxSession if they're meaningful (not raw session IDs)
+            const meaningfulCached = cached && isMeaningfulName(cached) ? cached : null;
+            const meaningfulCmd = t.lastCommand && isMeaningfulName(t.lastCommand) ? t.lastCommand : null;
+            const baseName = meaningfulCached || meaningfulCmd || `Shell ${i + 1}`;
             const name = uniqueName(baseName, usedNames);
             usedNames.push(name);
-            if (t.tmuxSession) setCachedTabName(t.tmuxSession, name);
+            // Only cache meaningful names (avoid polluting cache with session IDs)
+            if (t.tmuxSession && isMeaningfulName(name)) setCachedTabName(t.tmuxSession, name);
             return {
               id: t.id,
               tmuxSession: t.tmuxSession || '',
               name,
               checked: savedChecked.has(t.tmuxSession),
-              userRenamed: !!cached,
+              userRenamed: !!meaningfulCached,
+              lastCommand: t.lastCommand || undefined,
             };
           });
           setTabs(restored);
@@ -610,7 +656,6 @@ export function TerminalView({ onBack }: Props) {
 
   // Eagerly create terminal connections for ALL tabs so content is ready before switching
   // Skip only when tile mode is active AND has checked tabs (tiles are rendering)
-  const tileActive = tileMode && tabs.some(t => t.checked);
   useEffect(() => {
     if (!fontReady || tileActive) return;
     for (const tab of tabs) {
@@ -819,6 +864,99 @@ export function TerminalView({ onBack }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [hasChecked, aiClis, addTab, fetchTmuxSessions]);
 
+  /** Upload dropped image files to the server and paste their paths into the terminal */
+  const handleFileDrop = useCallback(async (tabId: string, files: FileList) => {
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    const paths: string[] = [];
+    for (const file of imageFiles) {
+      try {
+        const result = await api.uploadFile(file);
+        paths.push(result.path);
+      } catch (err) {
+        console.error('[DragDrop] Upload failed:', err);
+      }
+    }
+
+    if (paths.length === 0) return;
+
+    const inst = termInstances.get(tabId);
+    if (inst && inst.ws.readyState === WebSocket.OPEN) {
+      inst.ws.send(paths.join(' '));
+    }
+  }, []);
+
+  /** Create drag-drop event handlers for a terminal container element */
+  const setupDragDrop = useCallback((el: HTMLElement, tabId: string) => {
+    const onDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+      el.classList.add(DRAG_OVER_CLASS);
+    };
+
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return;
+      el.classList.remove(DRAG_OVER_CLASS);
+    };
+
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      el.classList.remove(DRAG_OVER_CLASS);
+      if (e.dataTransfer?.files.length) {
+        handleFileDrop(tabId, e.dataTransfer.files);
+      }
+    };
+
+    el.addEventListener('dragover', onDragOver);
+    el.addEventListener('dragleave', onDragLeave);
+    el.addEventListener('drop', onDrop);
+
+    return () => {
+      el.removeEventListener('dragover', onDragOver);
+      el.removeEventListener('dragleave', onDragLeave);
+      el.removeEventListener('drop', onDrop);
+      el.classList.remove(DRAG_OVER_CLASS);
+    };
+  }, [handleFileDrop]);
+
+  // Attach drag-drop handlers to all visible terminal containers
+  useEffect(() => {
+    const cleanups: Array<() => void> = [];
+
+    if (tileActive) {
+      for (const tab of checkedTabs) {
+        const el = tileContainerRefs.current.get(tab.id);
+        if (el) cleanups.push(setupDragDrop(el, tab.id));
+      }
+    } else {
+      for (const tab of tabs) {
+        const el = singleContainerRefs.current.get(tab.id);
+        if (el) cleanups.push(setupDragDrop(el, tab.id));
+      }
+    }
+
+    return () => { for (const cleanup of cleanups) cleanup(); };
+  }, [tabs, checkedTabs, tileActive, setupDragDrop]);
+
+  // Prevent browser default file drop behavior (navigating to file)
+  useEffect(() => {
+    const prevent = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+    };
+    document.addEventListener('dragover', prevent);
+    document.addEventListener('drop', prevent);
+    return () => {
+      document.removeEventListener('dragover', prevent);
+      document.removeEventListener('drop', prevent);
+    };
+  }, []);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* Tab bar */}
@@ -849,7 +987,7 @@ export function TerminalView({ onBack }: Props) {
                   ':hover': { bg: 'canvas.default' },
                   maxWidth: 500, minWidth: 150, flexShrink: 0,
                 }}
-                onClick={() => { if (tileMode) { setFocusedTileId(tab.id); const inst = termInstances.get(tab.id); if (inst) inst.term.focus(); } else { setActiveTabId(tab.id); } }}
+                onClick={() => { setActiveTabId(tab.id); if (tileMode) { setFocusedTileId(tab.id); const inst = termInstances.get(tab.id); if (inst) inst.term.focus(); } }}
               >
                 <input
                   type="checkbox"
@@ -859,7 +997,7 @@ export function TerminalView({ onBack }: Props) {
                   style={{ margin: 0, cursor: 'pointer' }}
                 />
                 <Box
-                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); if (tileMode) { setFocusedTileId(tab.id); const inst = termInstances.get(tab.id); if (inst) inst.term.focus(); } else { setActiveTabId(tab.id); } }}
+                  onClick={(e: React.MouseEvent) => { e.stopPropagation(); setActiveTabId(tab.id); if (tileMode) { setFocusedTileId(tab.id); const inst = termInstances.get(tab.id); if (inst) inst.term.focus(); } }}
                   onDoubleClick={(e: React.MouseEvent) => { e.stopPropagation(); setRenamingTabId(tab.id); setRenameValue(tab.name); }}
                   sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, overflow: 'hidden' }}
                 >
@@ -906,6 +1044,16 @@ export function TerminalView({ onBack }: Props) {
                     </Text>
                   )}
                 </Box>
+                {tab.lastCommand && showTodoPanel && (
+                  <Box
+                    as="button"
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); todoDispatcherRef.current.addItem(tab.lastCommand!); }}
+                    title={`Queue: ${tab.lastCommand}`}
+                    sx={{ bg: 'transparent', border: 'none', color: 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: 'accent.fg' } }}
+                  >
+                    <ListUnorderedIcon size={12} />
+                  </Box>
+                )}
                 {tab.tmuxSession && (
                   <Box
                     as="button"
@@ -1097,9 +1245,25 @@ export function TerminalView({ onBack }: Props) {
                     — {tab.lastIntent}
                   </span>
                 )}
+                {tab.lastCommand && showTodoPanel && (
+                  <button
+                    type="button"
+                    title={`Queue: ${tab.lastCommand}`}
+                    onClick={(e) => { e.stopPropagation(); todoDispatcherRef.current.addItem(tab.lastCommand!); }}
+                    style={{
+                      background: 'transparent', border: '1px solid',
+                      borderColor: focusedTileId === tab.id ? 'rgba(255,255,255,0.3)' : '#30363d',
+                      borderRadius: 3, color: focusedTileId === tab.id ? '#a5d6ff' : '#6e7681',
+                      cursor: 'pointer', padding: '0 3px', fontSize: 9, lineHeight: '16px', flexShrink: 0,
+                      marginLeft: 'auto',
+                    }}
+                  >
+                    <ListUnorderedIcon size={10} />
+                  </button>
+                )}
                 {tab.tmuxSession && (
                   <>
-                    <span style={{ fontSize: 9, color: focusedTileId === tab.id ? '#a5d6ff' : '#6e7681', fontFamily: 'monospace', marginLeft: 'auto', flexShrink: 0 }}>
+                    <span style={{ fontSize: 9, color: focusedTileId === tab.id ? '#a5d6ff' : '#6e7681', fontFamily: 'monospace', marginLeft: tab.lastCommand && showTodoPanel ? 0 : 'auto', flexShrink: 0 }}>
                       tmux attach -t {tab.tmuxSession}
                     </span>
                     <button
@@ -1142,7 +1306,6 @@ export function TerminalView({ onBack }: Props) {
                 visibility: tab.id === activeTabId ? 'visible' : 'hidden',
                 pointerEvents: tab.id === activeTabId ? 'auto' : 'none',
                 '& .xterm': { height: '100%' },
-                '& .xterm-viewport': { overflow: 'hidden !important' },
               }}
             />
           ))}
@@ -1157,9 +1320,19 @@ export function TerminalView({ onBack }: Props) {
           items={todoDispatcher.items}
           todoMode={todoDispatcher.todoMode}
           tabs={tabs}
+          lastCommand={
+            (tileActive
+              ? tabs.find(t => t.id === focusedTileId)?.lastCommand
+              : tabs.find(t => t.id === activeTabId)?.lastCommand
+            ) || undefined
+          }
           onAddItem={todoDispatcher.addItem}
           onRemoveItem={todoDispatcher.removeItem}
           onRetryItem={todoDispatcher.retryItem}
+          onStopRecurring={todoDispatcher.stopRecurring}
+          onSetRecurring={todoDispatcher.setRecurring}
+          onRunNow={todoDispatcher.runNow}
+          onUpdateItemText={todoDispatcher.updateItemText}
           onToggleTodoMode={todoDispatcher.toggleTodoMode}
           onClearCompleted={todoDispatcher.clearCompleted}
           onReorderItem={todoDispatcher.reorderItem}

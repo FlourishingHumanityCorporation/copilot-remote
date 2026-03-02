@@ -99,6 +99,11 @@ class TerminalManager extends EventEmitter {
       inputBuffer: '',
     };
 
+    // Register tmux session name with prompt detector for capture-pane checks
+    if (TMUX_PATH && tmuxName) {
+      this.promptDetector.setTmuxSession(id, tmuxName);
+    }
+
     // Auto-launch AI CLI after shell is ready
     if (aiCli) {
       const cli = AI_CLIS.find(c => c.name === aiCli);
@@ -135,6 +140,7 @@ class TerminalManager extends EventEmitter {
     delete envNoTmux.TMUX;
     try {
       execSync(`${TMUX_PATH} set-option -t "${tmuxSession}" window-size latest`, { stdio: 'ignore' });
+      execSync(`${TMUX_PATH} set-option -t "${tmuxSession}" mouse on`, { stdio: 'ignore' });
     } catch {}
     const term = pty.spawn(TMUX_PATH, [
       'new-session', '-s', groupName, '-t', tmuxSession,
@@ -158,6 +164,11 @@ class TerminalManager extends EventEmitter {
       lastCommand: '',
       inputBuffer: '',
     };
+
+    // Register tmux session name with prompt detector for capture-pane checks
+    if (tmuxSession) {
+      this.promptDetector.setTmuxSession(id, tmuxSession);
+    }
 
     term.onData((data) => {
       this.emit('data', id, data);
@@ -201,6 +212,19 @@ class TerminalManager extends EventEmitter {
     try {
       return execSync(
         `${TMUX_PATH} display-message -t "${sessionName}" -p "#{pane_title}"`,
+        { encoding: 'utf8', timeout: 2000 },
+      ).trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /** Get the current command running in a tmux session's active pane */
+  getTmuxPaneCommand(sessionName: string): string {
+    if (!TMUX_PATH) return '';
+    try {
+      return execSync(
+        `${TMUX_PATH} display-message -t "${sessionName}" -p "#{pane_current_command}"`,
         { encoding: 'utf8', timeout: 2000 },
       ).trim();
     } catch {
@@ -329,15 +353,17 @@ class TerminalManager extends EventEmitter {
       }
       const id = `term-${s.replace('cr-', '')}`;
       try {
-        // Set window-size on the target session (overrides session-level 'manual' etc.)
+        // Set window-size and mouse on the target session before grouping
         try {
           execSync(`${TMUX_PATH} set-option -t "${s}" window-size latest`, { stdio: 'ignore' });
+          execSync(`${TMUX_PATH} set-option -t "${s}" mouse on`, { stdio: 'ignore' });
         } catch {}
         const groupName = `cr-${Date.now()}`;
         const envNoTmux = { ...process.env, TERM: 'xterm-256color' } as Record<string, string>;
         delete envNoTmux.TMUX;
         const term = pty.spawn(TMUX_PATH, [
           'new-session', '-s', groupName, '-t', s,
+          ';', 'set', 'mouse', 'on',
           ';', 'set', 'window-size', 'latest',
           ';', 'set', 'aggressive-resize', 'on',
         ], {
@@ -348,15 +374,28 @@ class TerminalManager extends EventEmitter {
           env: envNoTmux,
         });
 
+        // Detect what's actually running in the tmux pane
+        const paneCmd = this.getTmuxPaneCommand(s);
+        const paneTitle = this.getTmuxPaneTitle(s);
+        // Prefer pane title (set by CLI tools), fall back to current command
+        // Filter out generic shell names that aren't useful as tab labels
+        const SHELL_NAMES = new Set(['bash', 'zsh', 'sh', 'fish', 'tmux', 'login']);
+        const detectedCommand = paneTitle && !SHELL_NAMES.has(paneTitle)
+          ? paneTitle
+          : (paneCmd && !SHELL_NAMES.has(paneCmd) ? paneCmd : '');
+
         const terminal: Terminal = {
           id,
           pty: term,
           cwd: homedir(),
           createdAt: new Date().toISOString(),
           tmuxSession: s,
-          lastCommand: s,  // Use session name so client doesn't treat as stale
+          lastCommand: detectedCommand,
           inputBuffer: '',
         };
+
+        // Register tmux session with prompt detector for capture-pane checks
+        this.promptDetector.setTmuxSession(id, s);
 
         term.onData((data) => {
           this.emit('data', id, data);
