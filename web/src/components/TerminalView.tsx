@@ -273,27 +273,27 @@ class TerminalWriter {
       this.onPause?.();
     }
 
-    // Viewport scroll lock: if the batch contains screen-clearing sequences (ED, cursor home),
-    // xterm.js will jump the viewport during progressive rendering of the batch.
-    // Lock the viewport at its current position during the write, then snap to bottom
-    // in the callback (if user was already at the bottom).
+    // Viewport scroll stabilization: if the batch contains screen-clearing sequences
+    // (ED, cursor home), xterm.js may jump the viewport during progressive rendering.
+    // Save the scroll position before write and restore it in the callback to prevent
+    // visible oscillation. If user was at the bottom, snap to bottom after write.
     const vp = this.getViewport();
     const hasScreenClear = TerminalWriter.SCREEN_CLEAR_RE.test(data);
+    let savedScrollTop = 0;
     let wasAtBottom = false;
     if (hasScreenClear && vp) {
+      savedScrollTop = vp.scrollTop;
       const BOTTOM_THRESHOLD_PX = 5; // within 5px of bottom counts as "at bottom"
-      wasAtBottom = vp.scrollTop >= (vp.scrollHeight - vp.clientHeight - BOTTOM_THRESHOLD_PX);
-      // Freeze: prevent scroll position changes during write
-      vp.style.overflowY = 'hidden';
+      wasAtBottom = savedScrollTop >= (vp.scrollHeight - vp.clientHeight - BOTTOM_THRESHOLD_PX);
     }
 
     this.term.write(data, () => {
-      // Unfreeze viewport and restore scroll position
+      // Restore scroll position after write completes
       if (hasScreenClear && vp) {
-        vp.style.overflowY = '';
         if (wasAtBottom) {
-          // Snap to bottom — user was following output
-          vp.scrollTop = vp.scrollHeight;
+          vp.scrollTop = vp.scrollHeight; // snap to bottom — user was following output
+        } else {
+          vp.scrollTop = savedScrollTop;  // restore — user was reading history
         }
       }
       this.watermark = Math.max(0, this.watermark - data.length);
