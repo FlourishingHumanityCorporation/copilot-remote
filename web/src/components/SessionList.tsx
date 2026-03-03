@@ -39,6 +39,9 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
   const [editName, setEditName] = useState('');
   const [addingTagId, setAddingTagId] = useState<string | null>(null);
   const [newTag, setNewTag] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [addingTagLoading, setAddingTagLoading] = useState(false);
+  const [removingTagKey, setRemovingTagKey] = useState<string | null>(null);
 
   // Notify parent when editing state changes to pause polling
   const setEditing = useCallback((id: string | null) => {
@@ -76,15 +79,25 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
   }, [setEditing]);
 
   const handleSaveRename = useCallback(async (sessionId: string) => {
-    await api.updateSessionMeta(sessionId, { name: editName.trim() || undefined });
-    onRefresh();
-    setEditing(null);
+    setSavingId(sessionId);
+    try {
+      await api.updateSessionMeta(sessionId, { name: editName.trim() || undefined });
+      onRefresh();
+      setEditing(null);
+    } finally {
+      setSavingId(null);
+    }
   }, [editName, onRefresh, setEditing]);
 
   const handleAddTag = useCallback(async (sessionId: string) => {
     if (newTag.trim()) {
-      await api.addTag(sessionId, newTag.trim());
-      onRefresh();
+      setAddingTagLoading(true);
+      try {
+        await api.addTag(sessionId, newTag.trim());
+        onRefresh();
+      } finally {
+        setAddingTagLoading(false);
+      }
     }
     setNewTag('');
     setAddingTag(null);
@@ -92,8 +105,14 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
 
   const handleRemoveTag = useCallback(async (e: React.MouseEvent, sessionId: string, tag: string) => {
     e.stopPropagation();
-    await api.removeTag(sessionId, tag);
-    onRefresh();
+    const key = `${sessionId}:${tag}`;
+    setRemovingTagKey(key);
+    try {
+      await api.removeTag(sessionId, tag);
+      onRefresh();
+    } finally {
+      setRemovingTagKey(null);
+    }
   }, [onRefresh]);
 
   const displayName = (s: Session) => s.name || s.summary || s.cwd.split('/').pop() || s.id.slice(0, 8);
@@ -138,9 +157,10 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
                     size="small"
                     sx={{ flex: 1, fontSize: 0, bg: 'canvas.default', color: 'fg.default' }}
                     autoFocus
+                    disabled={savingId === session.id}
                   />
-                  <Button size="small" variant="primary" onClick={() => handleSaveRename(session.id)} sx={{ fontSize: 0, py: 0, px: 2 }} aria-label="Save name">
-                    Save
+                  <Button size="small" variant="primary" onClick={() => handleSaveRename(session.id)} sx={{ fontSize: 0, py: 0, px: 2 }} aria-label="Save name" disabled={savingId === session.id}>
+                    {savingId === session.id ? 'Saving...' : 'Save'}
                   </Button>
                 </Box>
               ) : (
@@ -182,9 +202,10 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
                       {tag}
                       <Box
                         as="button"
-                        sx={{ bg: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', p: 0, display: 'flex', opacity: 0.7, ':hover': { opacity: 1 } }}
+                        sx={{ bg: 'transparent', border: 'none', color: 'inherit', cursor: removingTagKey === `${session.id}:${tag}` ? 'default' : 'pointer', p: 0, display: 'flex', opacity: removingTagKey === `${session.id}:${tag}` ? 0.3 : 0.7, ':hover': { opacity: removingTagKey === `${session.id}:${tag}` ? 0.3 : 1 } }}
                         onClick={(e: React.MouseEvent) => handleRemoveTag(e, session.id, tag)}
                         aria-label={`Remove ${tag} tag`}
+                        disabled={removingTagKey === `${session.id}:${tag}`}
                       >
                         <XIcon size={8} />
                       </Box>
@@ -197,10 +218,11 @@ export function SessionList({ sessions, loading, error, activeId, onSelect, onDe
                       value={newTag}
                       onChange={e => setNewTag(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter') handleAddTag(session.id); if (e.key === 'Escape') { setAddingTag(null); setNewTag(''); } }}
-                      placeholder="tag"
+                      placeholder={addingTagLoading ? '...' : 'tag'}
                       autoFocus
+                      disabled={addingTagLoading}
                       aria-label="New tag name"
-                      style={{ width: 50, fontSize: 10, padding: '1px 4px', borderRadius: 4, border: '1px solid #444c56', background: '#161b22', color: '#e6edf3' }}
+                      style={{ width: 50, fontSize: 10, padding: '1px 4px', borderRadius: 4, border: '1px solid #444c56', background: '#161b22', color: '#e6edf3', opacity: addingTagLoading ? 0.5 : 1 }}
                     />
                   </Box>
                 ) : (

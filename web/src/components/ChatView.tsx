@@ -20,6 +20,7 @@ export function ChatView({ session, messages, onSend, onResume, onBack }: Props)
   const [input, setInput] = useState('');
   const [historicalMessages, setHistoricalMessages] = useState<ChatMessage[]>([]);
   const [resuming, setResuming] = useState(false);
+  const [killing, setKilling] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastEscRef = useRef(0);
 
@@ -81,10 +82,13 @@ export function ChatView({ session, messages, onSend, onResume, onBack }: Props)
   }, [handleSend]);
 
   const handleKill = useCallback(async () => {
+    setKilling(true);
     try {
       await api.killSession(session.id);
     } catch (err) {
       console.error('[ChatView] Failed to kill session:', err);
+    } finally {
+      setKilling(false);
     }
   }, [session.id]);
 
@@ -123,10 +127,11 @@ export function ChatView({ session, messages, onSend, onResume, onBack }: Props)
         {isRunning ? (
           <IconButton
             icon={SquareIcon}
-            aria-label="Stop session"
+            aria-label={killing ? 'Stopping session' : 'Stop session'}
             variant="danger"
             size="small"
             onClick={handleKill}
+            disabled={killing}
           />
         ) : (
           <Button
