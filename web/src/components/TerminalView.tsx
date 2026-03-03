@@ -1012,34 +1012,29 @@ export function TerminalView({ onBack }: Props) {
   }, [tileMode]);
 
   // Prevent macOS trackpad momentum "rocket scroll" while preserving normal
-  // scroll in tmux. Strategy: block ALL native wheel events, then re-dispatch
-  // controlled synthetic events with clamped deltaY. A module-level flag
-  // prevents the capture handler from re-catching our synthetic events.
-  // Momentum detection: track delta decay patterns to identify and fully
-  // suppress macOS inertial scrolling.
+  // scroll in tmux. Strategy: only BLOCK bad events (momentum, throttled,
+  // font-change) and let good events pass through as native trusted events.
+  // This preserves xterm.js mouse mode handling (tmux scroll) which requires
+  // isTrusted=true events that synthetic re-dispatch cannot provide.
   useEffect(() => {
     let lastWheel = 0;
     let lastAbsDelta = 0;
     let momentumCount = 0;
-    let isSynthetic = false;
     const THROTTLE_MS = 120;       // max ~8 scroll events/sec
     const MOMENTUM_THRESHOLD = 3;  // consecutive decaying events to trigger momentum lock
     const MOMENTUM_RESET_MS = 300; // pause before resetting momentum detection
 
     const handler = (e: WheelEvent) => {
-      // Let our own synthetic events pass through untouched
-      if (isSynthetic) return;
-
       const target = e.target as HTMLElement;
       const xtermEl = target?.closest?.('.xterm');
       if (!xtermEl) return;
 
-      // Block ALL native wheel events — we control what gets through
-      e.preventDefault();
-      e.stopImmediatePropagation();
-
       // During font changes, block all scroll entirely
-      if (suppressScroll) return;
+      if (suppressScroll) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
 
       const now = performance.now();
       const elapsed = now - lastWheel;
@@ -1061,34 +1056,22 @@ export function TerminalView({ onBack }: Props) {
 
       // If we've detected momentum scrolling, block completely
       if (momentumCount >= MOMENTUM_THRESHOLD) {
+        e.preventDefault();
+        e.stopPropagation();
         lastWheel = now;
         return;
       }
 
       // Throttle: only allow one scroll event per THROTTLE_MS
-      if (elapsed < THROTTLE_MS) return;
+      if (elapsed < THROTTLE_MS) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
 
+      // Event passes all checks — let it through as a native trusted event
+      // so xterm.js can process it for scrollback and tmux mouse mode
       lastWheel = now;
-
-      // Find the viewport element inside xterm for dispatching
-      const viewport = xtermEl.querySelector('.xterm-viewport');
-      if (!viewport) return;
-
-      // Re-dispatch a synthetic event with clamped deltaY (max ±3 pixels)
-      const clampedDelta = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), 3);
-      const syntheticEvent = new WheelEvent('wheel', {
-        deltaX: 0,
-        deltaY: clampedDelta,
-        deltaMode: e.deltaMode,
-        bubbles: true,
-        cancelable: true,
-        clientX: e.clientX,
-        clientY: e.clientY,
-      });
-
-      isSynthetic = true;
-      viewport.dispatchEvent(syntheticEvent);
-      isSynthetic = false;
     };
     document.addEventListener('wheel', handler, { capture: true, passive: false } as any);
     return () => {
