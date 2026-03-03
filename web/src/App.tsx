@@ -7,8 +7,11 @@ import { TerminalView } from './components/TerminalView';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { UpdateButton } from './components/UpdateButton';
 import { NewSessionDialog } from './components/NewSessionDialog';
+import { InstallBanner } from './components/InstallBanner';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useSessions } from './hooks/useSessions';
+import { useInstallPrompt } from './hooks/useInstallPrompt';
+import { usePushNotifications } from './hooks/usePushNotifications';
 import { api } from './lib/api';
 import type { WsMessage, ChatMessage } from './types';
 
@@ -89,6 +92,8 @@ export default function App() {
 
   const { connected, subscribe, unsubscribe, sendInput } = useWebSocket(handleWsMessage);
   const { sessions, loading, error, refresh, setPaused } = useSessions();
+  const { canInstall, prompt: promptInstall, dismiss: dismissInstall } = useInstallPrompt();
+  const { isSupported: pushSupported, permission: pushPermission, isSubscribed: pushSubscribed, subscribe: subscribePush } = usePushNotifications();
 
   // Re-subscribe to restored session on mount
   useEffect(() => {
@@ -191,6 +196,12 @@ export default function App() {
 
   return (
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bg: 'canvas.default' }}>
+      {canInstall && (
+        <InstallBanner onInstall={promptInstall} onDismiss={dismissInstall} />
+      )}
+      {pushSupported && pushPermission === 'default' && !pushSubscribed && (
+        <PushPromptBanner onEnable={subscribePush} />
+      )}
       <Box sx={{ px: 3, pt: 2, borderBottom: '1px solid', borderColor: 'border.default' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
           <Text sx={{ fontWeight: 'bold', fontSize: 2, color: 'fg.default' }}>⚡ Copilot Remote</Text>
@@ -352,6 +363,54 @@ function ConnectionSetup({ onComplete }: { onComplete: () => void }) {
           Connect
         </button>
       </Box>
+    </Box>
+  );
+}
+
+function PushPromptBanner({ onEnable }: { onEnable: () => void }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        px: 3,
+        py: 2,
+        bg: 'canvas.subtle',
+        borderBottom: '1px solid',
+        borderColor: 'border.muted',
+      }}
+      role="banner"
+      aria-label="Enable notifications"
+    >
+      <Text sx={{ flex: 1, fontSize: 1, color: 'fg.muted' }}>
+        Enable notifications to get alerts when sessions complete.
+      </Text>
+      <button
+        onClick={onEnable}
+        aria-label="Enable notifications"
+        style={{
+          padding: '4px 10px', borderRadius: 6,
+          background: '#1f6feb', color: '#fff', border: 'none',
+          cursor: 'pointer', fontWeight: 600, fontSize: 12,
+        }}
+      >
+        Enable
+      </button>
+      <button
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss notifications prompt"
+        style={{
+          padding: '4px 8px', borderRadius: 6,
+          background: 'transparent', color: 'var(--fgColor-muted, #8b949e)',
+          border: '1px solid var(--borderColor-default, #30363d)',
+          cursor: 'pointer', fontSize: 12,
+        }}
+      >
+        Not now
+      </button>
     </Box>
   );
 }

@@ -17,6 +17,7 @@ import { loadSwarmKeys, generateSwarmKey, revokeSwarmKey, setSwarmEnabled, isSwa
 import { loadBlocklist as loadSwarmBlocklist } from './swarm-blocklist.js';
 import { swarmTunnel } from './swarm-tunnel.js';
 import { checkForUpdate, applyUpdate } from './update-manager.js';
+import { getVapidPublicKey, addSubscription, removeSubscription, sendPushNotification, type PushSubscription } from './push-manager.js';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -342,6 +343,12 @@ acpManager.on('tool', (sessionId: string, tool: any) => {
 
 acpManager.on('turn_complete', (sessionId: string, stopReason: string) => {
   broadcast(sessionId, { type: 'turn_complete', sessionId, stopReason, timestamp: new Date().toISOString() });
+  // Send push notification to background clients
+  sendPushNotification(
+    'Copilot Remote',
+    'A session has a new response.',
+    `turn-complete-${sessionId}`,
+  ).catch(err => console.debug('[Push] Failed to send notification:', err));
 });
 
 acpManager.on('error', (sessionId: string, err: Error) => {
@@ -600,6 +607,31 @@ app.post('/api/update/apply', (_req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Push notification endpoints
+app.get('/api/push/vapid-public-key', (_req, res) => {
+  res.json({ publicKey: getVapidPublicKey() });
+});
+
+app.post('/api/push/subscribe', (req, res) => {
+  const { endpoint, keys } = req.body as Partial<PushSubscription>;
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    res.status(400).json({ error: 'endpoint and keys (p256dh, auth) are required' });
+    return;
+  }
+  addSubscription({ endpoint, keys });
+  res.status(201).json({ subscribed: true });
+});
+
+app.delete('/api/push/subscribe', (req, res) => {
+  const { endpoint } = req.body as { endpoint?: string };
+  if (!endpoint) {
+    res.status(400).json({ error: 'endpoint is required' });
+    return;
+  }
+  removeSubscription(endpoint);
+  res.json({ unsubscribed: true });
 });
 
 // Serve built frontend (production)

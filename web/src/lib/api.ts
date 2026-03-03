@@ -83,4 +83,13 @@ export const api = {
 
   applyUpdate: () =>
     request<{ success: boolean; message: string }>('/api/update/apply', { method: 'POST' }),
+
+  getPushVapidPublicKey: () =>
+    request<{ publicKey: string }>('/api/push/vapid-public-key'),
+
+  subscribePush: (subscription: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+    request<{ subscribed: boolean }>('/api/push/subscribe', { method: 'POST', body: JSON.stringify(subscription) }),
+
+  unsubscribePush: (endpoint: string) =>
+    request<{ unsubscribed: boolean }>('/api/push/subscribe', { method: 'DELETE', body: JSON.stringify({ endpoint }) }),
 };
