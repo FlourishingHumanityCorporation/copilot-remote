@@ -154,6 +154,8 @@ const FOCUS_MODE_KEY = 'copilot-remote:focusMode';
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 24;
 const DEFAULT_FONT_SIZE = 14;
+/** Number of prompts per tile before auto-triggering AI summarize */
+const AUTO_SUMMARIZE_PROMPT_INTERVAL = 5;
 /** CSS class applied to terminal containers during image drag-over */
 const DRAG_OVER_CLASS = 'drag-over-highlight';
 
@@ -186,6 +188,8 @@ class TerminalWriter {
   private rafId: number | null = null;
   private syncMode = false;  // DEC 2026 synchronized output active
   private syncBuffer = '';   // buffered data during sync mode
+  private debugFlushCount = 0;  // debug counter
+  private debugLastLogTime = 0; // throttle debug logs
   private watermark = 0;
   private paused = false;
   private onPause: (() => void) | null = null;
@@ -199,9 +203,6 @@ class TerminalWriter {
   // DEC 2026 synchronized output escape sequences
   private static readonly SYNC_START = '\x1b[?2026h';
   private static readonly SYNC_END = '\x1b[?2026l';
-
-  // Screen-clearing ANSI sequences that cause viewport jumps during progressive rendering
-  private static readonly SCREEN_CLEAR_RE = /\x1b\[\d*J|\x1b\[H/;
 
   constructor(private term: Terminal) {}
 
@@ -273,27 +274,40 @@ class TerminalWriter {
       this.onPause?.();
     }
 
-    // Viewport scroll stabilization: if the batch contains screen-clearing sequences
-    // (ED, cursor home), xterm.js may jump the viewport during progressive rendering.
-    // Save the scroll position before write and restore it in the callback to prevent
-    // visible oscillation. If user was at the bottom, snap to bottom after write.
+    // Detect alternate screen mode (tmux, vim, less, AI tools like Claude Code)
+    const inAlternateScreen = this.term.buffer.active.type === 'alternate';
+
+    // Viewport scroll stabilization: xterm.js auto-scrolls to the bottom on
+    // every write. In alternate screen mode, force scrollTop=0 to prevent
+    // transient scroll jumps during rapid redraws. In normal mode, save/restore
+    // scroll position when the user is reading history.
     const vp = this.getViewport();
-    const hasScreenClear = TerminalWriter.SCREEN_CLEAR_RE.test(data);
     let savedScrollTop = 0;
-    let wasAtBottom = false;
-    if (hasScreenClear && vp) {
+    let wasAtBottom = true;
+    if (vp) {
       savedScrollTop = vp.scrollTop;
       const BOTTOM_THRESHOLD_PX = 5; // within 5px of bottom counts as "at bottom"
       wasAtBottom = savedScrollTop >= (vp.scrollHeight - vp.clientHeight - BOTTOM_THRESHOLD_PX);
     }
 
     this.term.write(data, () => {
-      // Restore scroll position after write completes
-      if (hasScreenClear && vp) {
-        if (wasAtBottom) {
-          vp.scrollTop = vp.scrollHeight; // snap to bottom — user was following output
-        } else {
-          vp.scrollTop = savedScrollTop;  // restore — user was reading history
+      if (vp) {
+        if (inAlternateScreen) {
+          // Alternate screen: force scrollTop to 0 — there should be no scrollback,
+          // but xterm.js may transiently create rows during rapid redraws
+          const scrollWasNonZero = vp.scrollTop !== 0;
+          vp.scrollTop = 0;
+          // Debug: log when scroll lock actually corrects a non-zero scrollTop
+          this.debugFlushCount++;
+          const now = performance.now();
+          const DEBUG_LOG_INTERVAL_MS = 2000; // throttle to once per 2s
+          if (now - this.debugLastLogTime > DEBUG_LOG_INTERVAL_MS) {
+            console.debug(`[TerminalWriter] altScreen flush #${this.debugFlushCount}: scrollTop=${scrollWasNonZero ? 'corrected' : '0'}, bytes=${data.length}, scrollHeight=${vp.scrollHeight}, clientHeight=${vp.clientHeight}`);
+            this.debugLastLogTime = now;
+          }
+        } else if (!wasAtBottom) {
+          // Normal mode: restore scroll position when user is reading history
+          vp.scrollTop = savedScrollTop;
         }
       }
       this.watermark = Math.max(0, this.watermark - data.length);
@@ -375,16 +389,22 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
   const globalFontSizeRef = useRef(globalFontSize);
   globalFontSizeRef.current = globalFontSize;
   const [summarizingTabId, setSummarizingTabId] = useState<string | null>(null);
-  const autoSummarizedRef = useRef<Set<string>>(new Set());
+  /** Per-tile prompt counter — triggers auto-summarize every N prompts */
+  const promptCountRef = useRef<Map<string, number>>(new Map());
 
-  /** Ask the server to summarize a terminal's content using AI */
-  const summarizeTab = useCallback(async (tabId: string) => {
+  /** Ask the server to summarize a terminal's content using AI.
+   *  @param manual — true when user clicks the button (locks the name so
+   *  server-driven renames don't overwrite it). Auto-summaries leave
+   *  userRenamed false so subsequent auto-summaries keep updating. */
+  const summarizeTab = useCallback(async (tabId: string, manual = false) => {
     setSummarizingTabId(tabId);
     try {
       const result = await api.summarizeTerminal(tabId);
       if (result.title) {
         const tab = tabsRef.current.find(t => t.id === tabId);
-        setTabs(prev => prev.map(t => t.id === tabId ? { ...t, name: result.title!, userRenamed: true } : t));
+        setTabs(prev => prev.map(t =>
+          t.id === tabId ? { ...t, name: result.title!, userRenamed: manual || t.userRenamed } : t
+        ));
         if (tab?.tmuxSession) setCachedTabName(tab.tmuxSession, result.title);
       }
     } catch (err) {
@@ -567,10 +587,10 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
         if (parsed.type === 'prompt') {
           // Shell prompt returned — notify todo dispatcher
           todoDispatcherRef.current.onTilePromptReturned(tabId);
-          // Auto-summarize on first prompt detection per tab (if not user-renamed)
-          const tab = tabsRef.current.find(t => t.id === tabId);
-          if (tab && !tab.userRenamed && !autoSummarizedRef.current.has(tabId)) {
-            autoSummarizedRef.current.add(tabId);
+          // Track prompts per tile and auto-summarize every N prompts
+          const count = (promptCountRef.current.get(tabId) ?? 0) + 1;
+          promptCountRef.current.set(tabId, count);
+          if (count % AUTO_SUMMARIZE_PROMPT_INTERVAL === 0) {
             summarizeTab(tabId);
           }
           return;
@@ -996,7 +1016,12 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
     if (!tileActive) {
       try { inst.fitAddon.fit(); } catch (_err) { /* fit may fail before terminal is fully mounted */ }
     }
-    inst.term.scrollToBottom();
+    // Only scroll to bottom in normal screen mode; alternate screen (tmux, vim,
+    // Claude Code) uses scrollTop=0 enforced by TerminalWriter — calling
+    // scrollToBottom() here would cause rocket scroll.
+    if (inst.term.buffer.active.type !== 'alternate') {
+      inst.term.scrollToBottom();
+    }
     inst.term.focus();
   }, [activeTabId, tileActive, tabs.length, fontReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1011,67 +1036,17 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
     return () => window.removeEventListener('resize', handleResize);
   }, [tileMode]);
 
-  // Prevent macOS trackpad momentum "rocket scroll" while preserving normal
-  // scroll in tmux. Strategy: only BLOCK bad events (momentum, throttled,
-  // font-change) and let good events pass through as native trusted events.
-  // This preserves xterm.js mouse mode handling (tmux scroll) which requires
-  // isTrusted=true events that synthetic re-dispatch cannot provide.
+  // Block wheel events only during font-size changes (which trigger fitAddon.fit()
+  // that can cause internal scroll jumps). Normal trackpad scrolling is allowed
+  // through to xterm.js for scrollback and tmux mouse mode handling.
+  // Rocket scroll prevention is handled by TerminalWriter's scrollTop save/restore.
   useEffect(() => {
-    let lastWheel = 0;
-    let lastAbsDelta = 0;
-    let momentumCount = 0;
-    const THROTTLE_MS = 120;       // max ~8 scroll events/sec
-    const MOMENTUM_THRESHOLD = 3;  // consecutive decaying events to trigger momentum lock
-    const MOMENTUM_RESET_MS = 300; // pause before resetting momentum detection
-
     const handler = (e: WheelEvent) => {
+      if (!suppressScroll) return;
       const target = e.target as HTMLElement;
-      const xtermEl = target?.closest?.('.xterm');
-      if (!xtermEl) return;
-
-      // During font changes, block all scroll entirely
-      if (suppressScroll) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      const now = performance.now();
-      const elapsed = now - lastWheel;
-      const absDelta = Math.abs(e.deltaY);
-
-      // Momentum detection: rapid events with decaying or tiny deltas
-      if (elapsed < 80 && absDelta > 0) {
-        if (absDelta <= lastAbsDelta || absDelta < 4) {
-          momentumCount++;
-        } else {
-          momentumCount = 0;
-        }
-      } else if (elapsed >= MOMENTUM_RESET_MS) {
-        // Long pause — user lifted finger, reset momentum tracking
-        momentumCount = 0;
-      }
-
-      lastAbsDelta = absDelta;
-
-      // If we've detected momentum scrolling, block completely
-      if (momentumCount >= MOMENTUM_THRESHOLD) {
-        e.preventDefault();
-        e.stopPropagation();
-        lastWheel = now;
-        return;
-      }
-
-      // Throttle: only allow one scroll event per THROTTLE_MS
-      if (elapsed < THROTTLE_MS) {
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-
-      // Event passes all checks — let it through as a native trusted event
-      // so xterm.js can process it for scrollback and tmux mouse mode
-      lastWheel = now;
+      if (!target?.closest?.('.xterm')) return;
+      e.preventDefault();
+      e.stopPropagation();
     };
     document.addEventListener('wheel', handler, { capture: true, passive: false } as any);
     return () => {
@@ -1167,6 +1142,7 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
         : Math.max(MIN_FONT_SIZE, base - 1);
 
       suppressPtyResize = true;
+      suppressScroll = true;
       for (const tab of checked) {
         const container = containerRefs.current.get(tab.id);
         if (!container || !container.isConnected) continue;
@@ -1184,10 +1160,15 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
         // Reduce font and fit to tile container — no PTY resize
         inst.term.options.fontSize = tileFontSize;
         try { inst.fitAddon.fit(); } catch {}
-        // Defer scrollToBottom to avoid fighting with rapid terminal output redraws
-        setTimeout(() => inst.term.scrollToBottom(), 50);
+        // Only scroll to bottom in normal screen mode; alternate screen uses
+        // scrollTop=0 enforced by TerminalWriter — scrollToBottom() causes rocket scroll.
+        if (inst.term.buffer.active.type !== 'alternate') {
+          setTimeout(() => inst.term.scrollToBottom(), 50);
+        }
       }
       suppressPtyResize = false;
+      // Re-enable scroll after a brief delay to let xterm settle
+      setTimeout(() => { suppressScroll = false; }, 300);
     };
 
     // Apply after layout settles (two rAFs for grid to be fully rendered)
@@ -1478,7 +1459,7 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
                       }}
                     />
                   ) : (
-                    <Text sx={{ fontSize: '11px', color: 'fg.default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'mono' }}>
+                    <Text sx={{ fontSize: '11px', color: isActive ? '#ffffff' : 'fg.default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'mono' }}>
                       {tab.name}
                     </Text>
                   )}
@@ -1488,7 +1469,7 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
                     as="button"
                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); todoDispatcherRef.current.addItem(tab.lastCommand!); }}
                     title={`Queue: ${tab.lastCommand}`}
-                    sx={{ bg: 'transparent', border: 'none', color: 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: 'accent.fg' } }}
+                    sx={{ bg: 'transparent', border: 'none', color: isActive ? 'rgba(255,255,255,0.7)' : 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: isActive ? '#ffffff' : 'accent.fg' } }}
                   >
                     <ListUnorderedIcon size={12} />
                   </Box>
@@ -1496,9 +1477,9 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
                 {tab.tmuxSession && (
                   <Box
                     as="button"
-                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); summarizeTab(tab.id); }}
+                    onClick={(e: React.MouseEvent) => { e.stopPropagation(); summarizeTab(tab.id, true); }}
                     title="AI summarize session"
-                    sx={{ bg: 'transparent', border: 'none', color: summarizingTabId === tab.id ? 'accent.fg' : 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, opacity: summarizingTabId === tab.id ? 0.6 : 1, ':hover': { color: 'accent.fg' } }}
+                    sx={{ bg: 'transparent', border: 'none', color: summarizingTabId === tab.id ? 'accent.fg' : isActive ? 'rgba(255,255,255,0.7)' : 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, opacity: summarizingTabId === tab.id ? 0.6 : 1, ':hover': { color: isActive ? '#ffffff' : 'accent.fg' } }}
                   >
                     <SparkleIcon size={12} />
                   </Box>
@@ -1508,7 +1489,7 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
                     as="button"
                     onClick={(e: React.MouseEvent) => { e.stopPropagation(); closeAndTerminateTab(tab.id); }}
                     title="Terminate tmux session"
-                    sx={{ bg: 'transparent', border: 'none', color: 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: 'danger.fg' } }}
+                    sx={{ bg: 'transparent', border: 'none', color: isActive ? 'rgba(255,255,255,0.7)' : 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: isActive ? '#ff7b72' : 'danger.fg' } }}
                   >
                     <TrashIcon size={12} />
                   </Box>
@@ -1516,7 +1497,7 @@ export const TerminalView = memo(function TerminalView({ onBack }: Props) {
                 <Box
                   as="button"
                   onClick={(e: React.MouseEvent) => { e.stopPropagation(); closeTab(tab.id); }}
-                  sx={{ bg: 'transparent', border: 'none', color: 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: 'danger.fg' } }}
+                  sx={{ bg: 'transparent', border: 'none', color: isActive ? 'rgba(255,255,255,0.7)' : 'fg.muted', cursor: 'pointer', p: 0, ml: 1, display: 'flex', flexShrink: 0, ':hover': { color: isActive ? '#ff7b72' : 'danger.fg' } }}
                 >
                   <XIcon size={12} />
                 </Box>
